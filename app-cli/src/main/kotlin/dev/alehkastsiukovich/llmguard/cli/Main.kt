@@ -31,10 +31,14 @@ fun main(args: Array<String>) {
         policyLoader = YamlPolicyLoader(),
         guardEngine = GuardEngine(),
         adapters = listOf(GeminiCliAdapter()).associateBy(ProviderAdapter::id),
-        geminiWrapperCommand = GeminiWrapperCommand(
+        geminiWrapperCommand = InteractiveProxyCommand(
+            providerDisplayName = "gemini",
+            adapter = GeminiCliAdapter(),
+            realExecutableEnvVar = "LLM_GUARD_REAL_GEMINI",
             policyLoader = YamlPolicyLoader(),
             guardEngine = GuardEngine(),
             workspaceStager = WorkspaceStager(),
+            sessionRunner = PtySessionRunner(),
             environment = System.getenv(),
         ),
     ).run(args.toList())
@@ -47,7 +51,7 @@ internal class CliApplication(
     private val policyLoader: PolicyLoader,
     private val guardEngine: GuardEngine,
     private val adapters: Map<String, ProviderAdapter>,
-    private val geminiWrapperCommand: GeminiWrapperCommand,
+    private val geminiWrapperCommand: InteractiveProxyCommand,
 ) {
     fun run(args: List<String>): Int {
         if (args.isEmpty()) {

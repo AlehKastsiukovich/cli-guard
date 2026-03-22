@@ -34,7 +34,14 @@ What it does automatically:
 - stages a sanitized mirror of the whole project into a temporary workspace;
 - removes blocked files and rewrites redacted files before Gemini can read them;
 - rewrites `-p` / `--prompt` for headless mode if the prompt itself matches the policy;
+- proxies interactive TTY sessions through PTY and sanitizes ordinary prompt lines before they reach Gemini;
 - launches the real Gemini CLI from the sanitized workspace.
+
+Interactive note:
+
+- ordinary prompt lines are filtered before forwarding;
+- slash commands such as `/help` are passed through unchanged;
+- Gemini still works against the sanitized workspace, so file tools only see the mirrored project.
 
 Wrapper-specific flags:
 
@@ -88,4 +95,4 @@ After that, normal `gemini ...` usage goes through the guard first.
 - `LLM_GUARD_ATTACHMENTS_DIR`
 - `LLM_GUARD_STAGE_DIR`
 
-`gemini-cli` is the first provider-specific adapter. It uses Gemini CLI headless mode with `-p` and runs the command from the staged sanitized workspace.
+`gemini-cli` is the first provider-specific adapter. It supports both headless `-p` mode and interactive PTY-proxied sessions from the staged sanitized workspace.

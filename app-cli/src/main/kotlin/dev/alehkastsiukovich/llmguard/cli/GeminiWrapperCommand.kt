@@ -1,5 +1,7 @@
 package dev.alehkastsiukovich.llmguard.cli
 
+import dev.alehkastsiukovich.llmguard.adapter.InteractiveProviderAdapter
+import dev.alehkastsiukovich.llmguard.adapter.StagedWorkspaceDescriptor
 import dev.alehkastsiukovich.llmguard.guard.FindingSource
 import dev.alehkastsiukovich.llmguard.guard.GuardEngine
 import dev.alehkastsiukovich.llmguard.guard.GuardPrompt
@@ -15,14 +17,18 @@ import java.nio.file.Path
 import kotlin.io.path.Path
 import kotlin.io.path.invariantSeparatorsPathString
 
-internal class GeminiWrapperCommand(
+internal class InteractiveProxyCommand(
+    private val providerDisplayName: String,
+    private val adapter: InteractiveProviderAdapter,
+    private val realExecutableEnvVar: String,
     private val policyLoader: PolicyLoader,
     private val guardEngine: GuardEngine,
     private val workspaceStager: WorkspaceStager,
+    private val sessionRunner: InteractiveSessionRunner,
     private val environment: Map<String, String>,
 ) {
     fun run(args: List<String>): Int {
-        val wrapperArgs = parseGeminiWrapperArguments(args) ?: return 1
+        val wrapperArgs = parseInteractiveProxyArguments(args) ?: return 1
         val currentWorkingDirectory = Path("").toAbsolutePath().normalize()
         val policyPath = findPolicyPath(
             explicitPath = wrapperArgs.guardPolicyPath,
@@ -46,12 +52,12 @@ internal class GeminiWrapperCommand(
         }
 
         val projectRoot = policyPath.parent ?: currentWorkingDirectory
-        val geminiArguments = parseGeminiCliArguments(
-            args = wrapperArgs.geminiArguments,
+        val parsedProviderArguments = adapter.parseArguments(
+            args = wrapperArgs.providerArguments,
             currentWorkingDirectory = currentWorkingDirectory,
         ) ?: return 1
 
-        val promptEvaluation = geminiArguments.prompt?.let { prompt ->
+        val promptEvaluation = parsedProviderArguments.prompt?.let { prompt ->
             guardEngine.evaluate(
                 policy = policy,
                 request = GuardRequest(
@@ -80,7 +86,7 @@ internal class GeminiWrapperCommand(
             policy = policy,
             projectRoot = projectRoot,
             currentWorkingDirectory = currentWorkingDirectory,
-            externalIncludeDirectories = geminiArguments.includeDirectories.filter { !it.startsWith(projectRoot) },
+            externalIncludeDirectories = parsedProviderArguments.includeDirectories.filter { !it.startsWith(projectRoot) },
         )
 
         val workspaceNeedsApproval = workspace.findings.any { it.action == RuleActionType.CONFIRM }
@@ -91,12 +97,12 @@ internal class GeminiWrapperCommand(
         }
 
         val sanitizedPrompt = promptEvaluation?.prompt?.content
-        val preparedArguments = rewriteGeminiArguments(
-            originalArguments = wrapperArgs.geminiArguments,
-            parsedArguments = geminiArguments,
+        val preparedArguments = adapter.rewriteArguments(
+            originalArguments = wrapperArgs.providerArguments,
+            parsedArguments = parsedProviderArguments,
             sanitizedPrompt = sanitizedPrompt,
             originalWorkingDirectory = currentWorkingDirectory,
-            stagedWorkspace = workspace,
+            stagedWorkspace = workspace.toDescriptor(),
         )
 
         printWorkspaceSummary(workspace, promptEvaluation, currentWorkingDirectory, policyPath)
@@ -105,11 +111,34 @@ internal class GeminiWrapperCommand(
             return 0
         }
 
-        if (geminiArguments.prompt == null) {
-            println("Interactive Gemini session will use the sanitized workspace. Interactive prompt text is not filtered yet.")
+        val executable = wrapperArgs.guardRealExecutable ?: environment[realExecutableEnvVar] ?: adapter.defaultExecutable
+        if (parsedProviderArguments.prompt == null) {
+            println("Starting interactive $providerDisplayName proxy session.")
+            return sessionRunner.run(
+                config = InteractiveSessionConfig(
+                    executable = executable,
+                    arguments = preparedArguments,
+                    workingDirectory = workspace.workingDirectory,
+                    environment = mapOf(
+                        "LLM_GUARD_POLICY" to policyPath.toAbsolutePath().toString(),
+                        "LLM_GUARD_STAGE_DIR" to workspace.root.toString(),
+                    ),
+                ),
+                inputTransformer = { input ->
+                    if (!adapter.shouldSanitizeInteractiveInput(input)) {
+                        input
+                    } else {
+                        transformInteractiveInput(
+                            input = input,
+                            policy = policy,
+                            projectRoot = projectRoot,
+                            guardApprove = wrapperArgs.guardApprove,
+                        )
+                    }
+                },
+            )
         }
 
-        val executable = wrapperArgs.guardRealGemini ?: environment["LLM_GUARD_REAL_GEMINI"] ?: "gemini"
         val processBuilder = ProcessBuilder(listOf(executable) + preparedArguments)
             .directory(workspace.workingDirectory.toFile())
             .redirectInput(ProcessBuilder.Redirect.INHERIT)
@@ -121,6 +150,44 @@ internal class GeminiWrapperCommand(
         processEnvironment["LLM_GUARD_STAGE_DIR"] = workspace.root.toString()
 
         return processBuilder.start().waitFor()
+    }
+
+    private fun transformInteractiveInput(
+        input: String,
+        policy: dev.alehkastsiukovich.llmguard.policy.LlmGuardPolicy,
+        projectRoot: Path,
+        guardApprove: Boolean,
+    ): String? {
+        val evaluation = guardEngine.evaluate(
+            request = GuardRequest(
+                projectRoot = projectRoot,
+                prompt = GuardPrompt(
+                    content = input,
+                    sourceLabel = "interactive",
+                ),
+            ),
+            policy = policy,
+        )
+
+        return when {
+            evaluation.isBlocked -> {
+                printPromptFindings(evaluation)
+                println("[llm-guard] interactive input blocked and was not forwarded.")
+                null
+            }
+            evaluation.requiresApproval && !guardApprove -> {
+                printPromptFindings(evaluation)
+                println("[llm-guard] interactive input requires --guard-approve and was not forwarded.")
+                null
+            }
+            else -> {
+                val sanitized = evaluation.prompt?.content ?: input
+                if (sanitized != input) {
+                    println("[llm-guard] interactive input was sanitized before forwarding.")
+                }
+                sanitized
+            }
+        }
     }
 
     private fun printPromptFindings(result: GuardResult) {
@@ -144,7 +211,7 @@ internal class GeminiWrapperCommand(
         currentWorkingDirectory: Path,
         policyPath: Path,
     ) {
-        println("Gemini wrapper summary:")
+        println("${providerDisplayName.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }} proxy summary:")
         println("  Policy: ${policyPath.toAbsolutePath()}")
         println("  Project root: ${workspace.projectRoot}")
         println("  Working directory: ${currentWorkingDirectory.toAbsolutePath()}")
@@ -175,26 +242,26 @@ internal class GeminiWrapperCommand(
     }
 }
 
-internal data class GeminiWrapperArguments(
+internal data class InteractiveProxyArguments(
     val guardPolicyPath: Path?,
     val guardDryRun: Boolean,
     val guardApprove: Boolean,
-    val guardRealGemini: String?,
-    val geminiArguments: List<String>,
+    val guardRealExecutable: String?,
+    val providerArguments: List<String>,
 )
 
-internal fun parseGeminiWrapperArguments(args: List<String>): GeminiWrapperArguments? {
+internal fun parseInteractiveProxyArguments(args: List<String>): InteractiveProxyArguments? {
     var index = 0
     var guardPolicyPath: Path? = null
     var guardDryRun = false
     var guardApprove = false
-    var guardRealGemini: String? = null
-    val geminiArguments = mutableListOf<String>()
+    var guardRealExecutable: String? = null
+    val providerArguments = mutableListOf<String>()
 
     while (index < args.size) {
         when (val arg = args[index]) {
             "--guard-policy" -> {
-                guardPolicyPath = args.getOrNull(index + 1)?.let(::Path) ?: return guardMissingValue(arg)
+                guardPolicyPath = args.getOrNull(index + 1)?.let(::Path) ?: return interactiveProxyMissingValue(arg)
                 index += 2
             }
             "--guard-dry-run" -> {
@@ -205,147 +272,26 @@ internal fun parseGeminiWrapperArguments(args: List<String>): GeminiWrapperArgum
                 guardApprove = true
                 index += 1
             }
-            "--guard-real-gemini" -> {
-                guardRealGemini = args.getOrNull(index + 1) ?: return guardMissingValue(arg)
+            "--guard-real-executable",
+            "--guard-real-gemini",
+            -> {
+                guardRealExecutable = args.getOrNull(index + 1) ?: return interactiveProxyMissingValue(arg)
                 index += 2
             }
             else -> {
-                geminiArguments += args.drop(index)
+                providerArguments += args.drop(index)
                 break
             }
         }
     }
 
-    return GeminiWrapperArguments(
+    return InteractiveProxyArguments(
         guardPolicyPath = guardPolicyPath,
         guardDryRun = guardDryRun,
         guardApprove = guardApprove,
-        guardRealGemini = guardRealGemini,
-        geminiArguments = geminiArguments,
+        guardRealExecutable = guardRealExecutable,
+        providerArguments = providerArguments,
     )
-}
-
-internal data class ParsedGeminiCliArguments(
-    val prompt: PromptArgument?,
-    val includeDirectories: List<Path>,
-)
-
-internal data class PromptArgument(
-    val flag: String,
-    val index: Int,
-    val value: String,
-)
-
-internal fun parseGeminiCliArguments(
-    args: List<String>,
-    currentWorkingDirectory: Path,
-): ParsedGeminiCliArguments? {
-    var index = 0
-    var prompt: PromptArgument? = null
-    val includeDirectories = mutableListOf<Path>()
-
-    while (index < args.size) {
-        when (val arg = args[index]) {
-            "-p",
-            "--prompt",
-            -> {
-                val value = args.getOrNull(index + 1) ?: return geminiMissingValue(arg)
-                prompt = PromptArgument(flag = arg, index = index + 1, value = value)
-                index += 2
-            }
-            "--include-directories" -> {
-                val value = args.getOrNull(index + 1) ?: return geminiMissingValue(arg)
-                includeDirectories += parseIncludeDirectories(value, currentWorkingDirectory)
-                index += 2
-            }
-            else -> {
-                when {
-                    arg.startsWith("--prompt=") -> {
-                        prompt = PromptArgument(flag = "--prompt", index = index, value = arg.substringAfter("="))
-                    }
-                    arg.startsWith("--include-directories=") -> {
-                        includeDirectories += parseIncludeDirectories(
-                            arg.substringAfter("="),
-                            currentWorkingDirectory,
-                        )
-                    }
-                }
-                index += 1
-            }
-        }
-    }
-
-    return ParsedGeminiCliArguments(
-        prompt = prompt,
-        includeDirectories = includeDirectories.distinct(),
-    )
-}
-
-internal fun rewriteGeminiArguments(
-    originalArguments: List<String>,
-    parsedArguments: ParsedGeminiCliArguments,
-    sanitizedPrompt: String?,
-    originalWorkingDirectory: Path,
-    stagedWorkspace: StagedWorkspace,
-): List<String> {
-    if (originalArguments.isEmpty()) {
-        return emptyList()
-    }
-
-    val rewritten = originalArguments.toMutableList()
-    parsedArguments.prompt?.let { prompt ->
-        rewritten[prompt.index] = sanitizedPrompt ?: prompt.value
-    }
-
-    var index = 0
-    while (index < rewritten.size) {
-        val arg = rewritten[index]
-        when {
-            arg == "--include-directories" -> {
-                val rawValue = rewritten.getOrNull(index + 1) ?: break
-                rewritten[index + 1] = rewriteIncludeDirectories(
-                    rawValue = rawValue,
-                    originalWorkingDirectory = originalWorkingDirectory,
-                    stagedWorkspace = stagedWorkspace,
-                )
-                index += 2
-            }
-            arg.startsWith("--include-directories=") -> {
-                val rawValue = arg.substringAfter("=")
-                rewritten[index] = "--include-directories=" + rewriteIncludeDirectories(
-                    rawValue = rawValue,
-                    originalWorkingDirectory = originalWorkingDirectory,
-                    stagedWorkspace = stagedWorkspace,
-                )
-                index += 1
-            }
-            else -> index += 1
-        }
-    }
-
-    return rewritten
-}
-
-private fun rewriteIncludeDirectories(
-    rawValue: String,
-    originalWorkingDirectory: Path,
-    stagedWorkspace: StagedWorkspace,
-): String {
-    val originalPaths = rawValue.split(',').filter { it.isNotBlank() }.map { rawPath ->
-        val path = Path(rawPath)
-        if (path.isAbsolute) path.normalize() else originalWorkingDirectory.resolve(path).normalize()
-    }
-    return originalPaths.joinToString(",") { originalPath ->
-        val mapped = when {
-            originalPath.startsWith(stagedWorkspace.projectRoot) ->
-                stagedWorkspace.root.resolve(stagedWorkspace.projectRoot.relativize(originalPath))
-            else -> stagedWorkspace.stagedExternalIncludes[originalPath]
-                ?: stagedWorkspace.root.resolve("_external").resolve(
-                    originalPath.fileName?.toString() ?: originalPath.invariantSeparatorsPathString,
-                )
-        }
-        stagedWorkspace.workingDirectory.relativize(mapped).invariantSeparatorsPathString
-    }
 }
 
 internal fun findPolicyPath(
@@ -368,28 +314,19 @@ internal fun findPolicyPath(
     return null
 }
 
-private fun parseIncludeDirectories(
-    rawValue: String,
-    currentWorkingDirectory: Path,
-): List<Path> = rawValue
-    .split(',')
-    .filter { it.isNotBlank() }
-    .map { rawPath ->
-        val path = Path(rawPath)
-        if (path.isAbsolute) path.normalize() else currentWorkingDirectory.resolve(path).normalize()
-    }
-
-private fun guardMissingValue(argument: String): GeminiWrapperArguments? {
+private fun interactiveProxyMissingValue(argument: String): InteractiveProxyArguments? {
     System.err.println("Missing value for $argument")
-    return null
-}
-
-private fun geminiMissingValue(argument: String): ParsedGeminiCliArguments? {
-    System.err.println("Missing value for Gemini argument $argument")
     return null
 }
 
 private val candidatePolicyNames = listOf(
     "llm-policy.yaml",
     "llm-policy.yml",
+)
+
+private fun StagedWorkspace.toDescriptor(): StagedWorkspaceDescriptor = StagedWorkspaceDescriptor(
+    root = root,
+    projectRoot = projectRoot,
+    workingDirectory = workingDirectory,
+    stagedExternalIncludes = stagedExternalIncludes,
 )

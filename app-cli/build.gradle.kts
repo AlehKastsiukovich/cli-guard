@@ -12,6 +12,8 @@ dependencies {
     implementation(project(":adapter-spi"))
     implementation(project(":core-guard"))
     implementation(project(":core-policy"))
+    implementation(libs.pty4j)
+    runtimeOnly(libs.slf4j.nop)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
@@ -21,6 +23,7 @@ dependencies {
 application {
     applicationName = "llm-guard"
     mainClass = "dev.alehkastsiukovich.llmguard.cli.MainKt"
+    applicationDefaultJvmArgs = listOf("--enable-native-access=ALL-UNNAMED")
 }
 
 tasks.run {

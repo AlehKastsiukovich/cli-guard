@@ -1,8 +1,6 @@
 package dev.alehkastsiukovich.llmguard.cli
 
-import dev.alehkastsiukovich.llmguard.guard.StagedWorkspace
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Path
@@ -26,54 +24,22 @@ class GeminiWrapperCommandTest {
     }
 
     @Test
-    fun `parses gemini prompt and include directories`() {
-        val cwd = Path.of("/workspace/project")
-        val parsed = parseGeminiCliArguments(
-            args = listOf("-p", "review this", "--include-directories", "../shared,docs"),
-            currentWorkingDirectory = cwd,
-        )
-
-        assertNotNull(parsed)
-        assertEquals("review this", parsed!!.prompt!!.value)
-        assertEquals(
+    fun `parses generic proxy arguments`() {
+        val parsed = parseInteractiveProxyArguments(
             listOf(
-                Path.of("/workspace/shared"),
-                Path.of("/workspace/project/docs"),
-            ),
-            parsed.includeDirectories,
-        )
-    }
-
-    @Test
-    fun `rewrites prompt and external include directories against staged workspace`() {
-        val stageRoot = Files.createTempDirectory("llm-guard-stage")
-        val workingDirectory = stageRoot.resolve("app")
-        Files.createDirectories(workingDirectory)
-        val externalOriginal = Path.of("/workspace/shared")
-        val externalMirror = stageRoot.resolve("_external/1-shared")
-        Files.createDirectories(externalMirror)
-
-        val rewritten = rewriteGeminiArguments(
-            originalArguments = listOf("-p", "unsafe", "--include-directories", "/workspace/shared"),
-            parsedArguments = ParsedGeminiCliArguments(
-                prompt = PromptArgument(flag = "-p", index = 1, value = "unsafe"),
-                includeDirectories = listOf(externalOriginal),
-            ),
-            sanitizedPrompt = "safe",
-            originalWorkingDirectory = workingDirectory,
-            stagedWorkspace = StagedWorkspace(
-                root = stageRoot,
-                projectRoot = Path.of("/workspace/project"),
-                workingDirectory = workingDirectory,
-                stagedExternalIncludes = mapOf(externalOriginal to externalMirror),
-                mirroredFiles = 0,
-                redactedFiles = 0,
-                blockedFiles = 0,
-                findings = emptyList(),
+                "--guard-dry-run",
+                "--guard-policy",
+                "llm-policy.yaml",
+                "--guard-real-gemini",
+                "/usr/local/bin/gemini",
+                "-p",
+                "review this",
             ),
         )
 
-        assertEquals("safe", rewritten[1])
-        assertEquals("../_external/1-shared", rewritten[3])
+        assertEquals(true, parsed!!.guardDryRun)
+        assertEquals(Path.of("llm-policy.yaml"), parsed.guardPolicyPath)
+        assertEquals("/usr/local/bin/gemini", parsed.guardRealExecutable)
+        assertEquals(listOf("-p", "review this"), parsed.providerArguments)
     }
 }

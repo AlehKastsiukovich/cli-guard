@@ -2,6 +2,8 @@
 jackson = "2.20.0"
 junit = "5.13.4"
 kotlin = "2.2.20"
+pty4j = "0.13.4"
+slf4j = "2.0.13"
 
 [libraries]
 jackson-dataformat-yaml = { module = "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml", version.ref = "jackson" }
@@ -9,6 +11,8 @@ jackson-module-kotlin = { module = "com.fasterxml.jackson.module:jackson-module-
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+pty4j = { module = "org.jetbrains.pty4j:pty4j", version.ref = "pty4j" }
+slf4j-nop = { module = "org.slf4j:slf4j-nop", version.ref = "slf4j" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
