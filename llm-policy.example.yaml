@@ -1,0 +1,50 @@
+version: 1
+defaults:
+  on_unmatched: allow
+  redact_replacement: "<redacted>"
+detectors:
+  secrets:
+    enabled: true
+    action: redact
+  kotlin_symbols:
+    enabled: true
+rules:
+  - id: block-secret-files
+    description: Block Android and credential files from leaving the machine.
+    match:
+      paths:
+        - "**/local.properties"
+        - "**/gradle.properties"
+        - "**/*.jks"
+        - "**/*.keystore"
+        - "**/google-services.json"
+    action:
+      type: block
+
+  - id: redact-proprietary-billing
+    description: Remove billing symbols and marked code from shared context.
+    match:
+      kotlin:
+        packages:
+          - "com.company.billing.internal"
+        classes:
+          - "PaymentSignatureGenerator"
+          - "FraudDecisionEngine"
+        functions:
+          - "generateHmac"
+          - "calculateRiskScore"
+        annotations:
+          - "SensitiveForLLM"
+    action:
+      type: redact
+      replacement: "<redacted:kotlin-symbol>"
+
+  - id: confirm-internal-endpoints
+    description: Require explicit review for internal endpoints and environment markers.
+    match:
+      content_regex:
+        - "https://[^\\s]*\\.corp\\."
+        - "ENV_[A-Z0-9_]+"
+    action:
+      type: confirm
+
