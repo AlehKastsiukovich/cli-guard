@@ -5,17 +5,14 @@ import dev.alehkastsiukovich.llmguard.adapter.PreparedInvocation
 import dev.alehkastsiukovich.llmguard.adapter.PromptOrigin
 import dev.alehkastsiukovich.llmguard.adapter.PromptPayload
 import dev.alehkastsiukovich.llmguard.adapter.ProviderAdapter
-import dev.alehkastsiukovich.llmguard.adapter.gemini.GeminiCliAdapter
 import dev.alehkastsiukovich.llmguard.guard.AttachmentDisposition
 import dev.alehkastsiukovich.llmguard.guard.FindingSource
 import dev.alehkastsiukovich.llmguard.guard.GuardEngine
 import dev.alehkastsiukovich.llmguard.guard.GuardPrompt
 import dev.alehkastsiukovich.llmguard.guard.GuardRequest
 import dev.alehkastsiukovich.llmguard.guard.GuardResult
-import dev.alehkastsiukovich.llmguard.guard.WorkspaceStager
 import dev.alehkastsiukovich.llmguard.policy.PolicyLoader
 import dev.alehkastsiukovich.llmguard.policy.PolicyValidationException
-import dev.alehkastsiukovich.llmguard.policy.YamlPolicyLoader
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -27,21 +24,7 @@ import kotlin.io.path.exists
 import kotlin.io.path.invariantSeparatorsPathString
 
 fun main(args: Array<String>) {
-    val exitCode = CliApplication(
-        policyLoader = YamlPolicyLoader(),
-        guardEngine = GuardEngine(),
-        adapters = listOf(GeminiCliAdapter()).associateBy(ProviderAdapter::id),
-        geminiWrapperCommand = InteractiveProxyCommand(
-            providerDisplayName = "gemini",
-            adapter = GeminiCliAdapter(),
-            realExecutableEnvVar = "LLM_GUARD_REAL_GEMINI",
-            policyLoader = YamlPolicyLoader(),
-            guardEngine = GuardEngine(),
-            workspaceStager = WorkspaceStager(),
-            sessionRunner = PtySessionRunner(),
-            environment = System.getenv(),
-        ),
-    ).run(args.toList())
+    val exitCode = AppBootstrap.create().run(args.toList())
     if (exitCode != 0) {
         kotlin.system.exitProcess(exitCode)
     }
@@ -177,20 +160,19 @@ internal class CliApplication(
         }
 
         val stage = stageSanitizedContext(result)
-        println("Staged prompt and attachments in ${stage.root}")
+        System.err.println("Staged prompt and attachments in ${stage.root}")
 
         if (parsed.dryRun) {
             return 0
         }
 
-        val invocation = buildInvocation(parsed, stage, policyPath) ?: return 1
+        val invocation = buildInvocation(parsed, stage) ?: return 1
         return executeInvocation(invocation, policyPath, stage)
     }
 
     private fun buildInvocation(
         parsed: RunCommandOptions,
         stage: StagedContext,
-        policyPath: Path,
     ): PreparedInvocation? {
         val adapterId = parsed.adapterId
         if (adapterId == null) {
@@ -202,7 +184,7 @@ internal class CliApplication(
             return PreparedInvocation(
                 executable = parsed.providerCommand.first(),
                 arguments = parsed.providerCommand.drop(1),
-                workingDirectory = Path("").toAbsolutePath(),
+                workingDirectory = stage.root,
                 stdinPayload = if (parsed.pipePromptToStdin && stage.promptFile != null) {
                     Files.readString(stage.promptFile)
                 } else {
@@ -215,7 +197,7 @@ internal class CliApplication(
         val adapter = adapters[adapterId]
         if (adapter == null) {
             System.err.println("Unknown adapter: $adapterId")
-            println("Available adapters: ${adapters.keys.sorted().joinToString()}")
+            System.err.println("Available adapters: ${adapters.keys.sorted().joinToString()}")
             return null
         }
 
@@ -379,30 +361,30 @@ internal class CliApplication(
     }
 
     private fun printGuardSummary(result: GuardResult) {
-        println("Guard summary:")
+        System.err.println("Guard summary:")
         result.prompt?.let { prompt ->
-            println("  Prompt: ${if (prompt.wasRedacted) "redacted" else "unchanged"}")
+            System.err.println("  Prompt: ${if (prompt.wasRedacted) "redacted" else "unchanged"}")
         }
 
         if (result.attachments.isEmpty()) {
-            println("  Attachments: none")
+            System.err.println("  Attachments: none")
         } else {
-            println("  Attachments:")
+            System.err.println("  Attachments:")
             result.attachments.forEach { attachment ->
-                println("    - ${attachment.relativePath.invariantSeparatorsPathString}: ${attachment.disposition.label}")
+                System.err.println("    - ${attachment.relativePath.invariantSeparatorsPathString}: ${attachment.disposition.label}")
             }
         }
 
         if (result.findings.isEmpty()) {
-            println("  Findings: none")
+            System.err.println("  Findings: none")
         } else {
-            println("  Findings:")
+            System.err.println("  Findings:")
             result.findings.forEach { finding ->
                 val source = when (finding.source) {
                     FindingSource.POLICY_RULE -> finding.ruleId ?: "policy"
                     FindingSource.SECRET_DETECTOR -> "secret-detector"
                 }
-                println("    - [${finding.action.name.lowercase()}] ${finding.target} via $source: ${finding.message}")
+                System.err.println("    - [${finding.action.name.lowercase()}] ${finding.target} via $source: ${finding.message}")
             }
         }
     }

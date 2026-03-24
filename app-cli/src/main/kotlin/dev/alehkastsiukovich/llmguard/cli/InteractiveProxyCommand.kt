@@ -107,13 +107,13 @@ internal class InteractiveProxyCommand(
 
         printWorkspaceSummary(workspace, promptEvaluation, currentWorkingDirectory, policyPath)
         if (wrapperArgs.guardDryRun) {
-            println("Dry run only. Gemini CLI was not started.")
+            System.err.println("Dry run only. ${providerDisplayName.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }} was not started.")
             return 0
         }
 
         val executable = wrapperArgs.guardRealExecutable ?: environment[realExecutableEnvVar] ?: adapter.defaultExecutable
         if (parsedProviderArguments.prompt == null) {
-            println("Starting interactive $providerDisplayName proxy session.")
+            System.err.println("Starting interactive $providerDisplayName proxy session.")
             return sessionRunner.run(
                 config = InteractiveSessionConfig(
                     executable = executable,
@@ -172,18 +172,18 @@ internal class InteractiveProxyCommand(
         return when {
             evaluation.isBlocked -> {
                 printPromptFindings(evaluation)
-                println("[llm-guard] interactive input blocked and was not forwarded.")
+                System.err.println("[llm-guard] interactive input blocked and was not forwarded.")
                 null
             }
             evaluation.requiresApproval && !guardApprove -> {
                 printPromptFindings(evaluation)
-                println("[llm-guard] interactive input requires --guard-approve and was not forwarded.")
+                System.err.println("[llm-guard] interactive input requires --guard-approve and was not forwarded.")
                 null
             }
             else -> {
                 val sanitized = evaluation.prompt?.content ?: input
                 if (sanitized != input) {
-                    println("[llm-guard] interactive input was sanitized before forwarding.")
+                    System.err.println("[llm-guard] interactive input was sanitized before forwarding.")
                 }
                 sanitized
             }
@@ -195,13 +195,13 @@ internal class InteractiveProxyCommand(
             return
         }
 
-        println("Prompt findings:")
+        System.err.println("Prompt findings:")
         result.findings.forEach { finding ->
             val source = when (finding.source) {
                 FindingSource.POLICY_RULE -> finding.ruleId ?: "policy"
                 FindingSource.SECRET_DETECTOR -> "secret-detector"
             }
-            println("  - [${finding.action.name.lowercase()}] via $source: ${finding.message}")
+            System.err.println("  - [${finding.action.name.lowercase()}] via $source: ${finding.message}")
         }
     }
 
@@ -211,32 +211,32 @@ internal class InteractiveProxyCommand(
         currentWorkingDirectory: Path,
         policyPath: Path,
     ) {
-        println("${providerDisplayName.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }} proxy summary:")
-        println("  Policy: ${policyPath.toAbsolutePath()}")
-        println("  Project root: ${workspace.projectRoot}")
-        println("  Working directory: ${currentWorkingDirectory.toAbsolutePath()}")
-        println("  Staged workspace: ${workspace.root}")
-        println("  Files mirrored: ${workspace.mirroredFiles}")
-        println("  Files redacted: ${workspace.redactedFiles}")
-        println("  Files blocked: ${workspace.blockedFiles}")
+        System.err.println("${providerDisplayName.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }} proxy summary:")
+        System.err.println("  Policy: ${policyPath.toAbsolutePath()}")
+        System.err.println("  Project root: ${workspace.projectRoot}")
+        System.err.println("  Working directory: ${currentWorkingDirectory.toAbsolutePath()}")
+        System.err.println("  Staged workspace: ${workspace.root}")
+        System.err.println("  Files mirrored: ${workspace.mirroredFiles}")
+        System.err.println("  Files redacted: ${workspace.redactedFiles}")
+        System.err.println("  Files blocked: ${workspace.blockedFiles}")
         promptEvaluation?.prompt?.let { prompt ->
-            println("  Prompt: ${if (prompt.wasRedacted) "redacted" else "unchanged"}")
+            System.err.println("  Prompt: ${if (prompt.wasRedacted) "redacted" else "unchanged"}")
         }
 
         val notableFindings = workspace.findings
             .filter { it.action != RuleActionType.ALLOW }
             .take(10)
         if (notableFindings.isNotEmpty()) {
-            println("  Findings:")
+            System.err.println("  Findings:")
             notableFindings.forEach { finding ->
                 val source = when (finding.source) {
                     FindingSource.POLICY_RULE -> finding.ruleId ?: "policy"
                     FindingSource.SECRET_DETECTOR -> "secret-detector"
                 }
-                println("    - [${finding.action.name.lowercase()}] ${finding.target} via $source")
+                System.err.println("    - [${finding.action.name.lowercase()}] ${finding.target} via $source")
             }
             if (workspace.findings.size > notableFindings.size) {
-                println("    - ... and ${workspace.findings.size - notableFindings.size} more")
+                System.err.println("    - ... and ${workspace.findings.size - notableFindings.size} more")
             }
         }
     }

@@ -59,15 +59,17 @@ internal class PtySessionRunner : InteractiveSessionRunner {
             writer.close()
         }
 
-        Runtime.getRuntime().addShutdownHook(
-            Thread {
-                process.destroy()
-            },
-        )
+        val shutdownHook = Thread { process.destroy() }
+        Runtime.getRuntime().addShutdownHook(shutdownHook)
 
         val exitCode = process.waitFor()
         outputThread.join(250)
         inputThread.join(250)
+        try {
+            Runtime.getRuntime().removeShutdownHook(shutdownHook)
+        } catch (_: IllegalStateException) {
+            // JVM is already shutting down.
+        }
         return exitCode
     }
 }

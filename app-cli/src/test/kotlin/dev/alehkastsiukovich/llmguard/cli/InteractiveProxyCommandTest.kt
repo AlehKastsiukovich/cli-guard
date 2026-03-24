@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Path
 
-class GeminiWrapperCommandTest {
+class InteractiveProxyCommandTest {
     @Test
     fun `finds policy by walking up parent directories`() {
         val root = Files.createTempDirectory("llm-guard-policy-root")
