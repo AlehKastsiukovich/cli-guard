@@ -42,4 +42,23 @@ class InteractiveProxyCommandTest {
         assertEquals("/usr/local/bin/gemini", parsed.guardRealExecutable)
         assertEquals(listOf("-p", "review this"), parsed.providerArguments)
     }
+
+    @Test
+    fun `parses provider specific real executable flag`() {
+        val parsed = parseInteractiveProxyArguments(
+            args = listOf(
+                "--guard-real-codex",
+                "/opt/homebrew/bin/codex",
+                "exec",
+                "review this",
+            ),
+            realExecutableFlags = setOf(
+                "--guard-real-executable",
+                "--guard-real-codex",
+            ),
+        )
+
+        assertEquals("/opt/homebrew/bin/codex", parsed!!.guardRealExecutable)
+        assertEquals(listOf("exec", "review this"), parsed.providerArguments)
+    }
 }

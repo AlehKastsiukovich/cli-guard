@@ -5,6 +5,7 @@ import dev.alehkastsiukovich.llmguard.adapter.InvocationRequest
 import dev.alehkastsiukovich.llmguard.adapter.InteractivePromptArgument
 import dev.alehkastsiukovich.llmguard.adapter.PromptOrigin
 import dev.alehkastsiukovich.llmguard.adapter.PromptPayload
+import dev.alehkastsiukovich.llmguard.adapter.ProviderLaunchMode
 import dev.alehkastsiukovich.llmguard.adapter.StagedWorkspaceDescriptor
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -47,6 +48,7 @@ class GeminiCliAdapterTest {
             currentWorkingDirectory = Path.of("/workspace/project"),
         )
 
+        assertEquals(ProviderLaunchMode.DIRECT_PROCESS, parsed!!.launchMode)
         assertEquals("review this", parsed!!.prompt!!.value)
         assertEquals(
             listOf(
@@ -63,6 +65,7 @@ class GeminiCliAdapterTest {
         val rewritten = adapter.rewriteArguments(
             originalArguments = listOf("-p", "unsafe", "--include-directories", "/workspace/shared"),
             parsedArguments = ParsedInteractiveArguments(
+                launchMode = ProviderLaunchMode.DIRECT_PROCESS,
                 prompt = InteractivePromptArgument(flag = "-p", index = 1, value = "unsafe"),
                 includeDirectories = listOf(Path.of("/workspace/shared")),
             ),
@@ -73,6 +76,7 @@ class GeminiCliAdapterTest {
                 projectRoot = Path.of("/workspace/project"),
                 workingDirectory = Path.of("/stage/app"),
                 stagedExternalIncludes = mapOf(Path.of("/workspace/shared") to Path.of("/stage/_external/1-shared")),
+                stagedExternalFiles = emptyMap(),
             ),
         )
 

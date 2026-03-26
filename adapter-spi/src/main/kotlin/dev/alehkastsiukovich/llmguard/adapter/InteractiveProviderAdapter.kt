@@ -22,9 +22,17 @@ interface InteractiveProviderAdapter {
     fun shouldSanitizeInteractiveInput(line: String): Boolean = line.isNotBlank()
 }
 
+enum class ProviderLaunchMode {
+    INTERACTIVE_PROXY,
+    DIRECT_PROCESS,
+}
+
 data class ParsedInteractiveArguments(
+    val launchMode: ProviderLaunchMode,
     val prompt: InteractivePromptArgument?,
-    val includeDirectories: List<Path>,
+    val includeDirectories: List<Path> = emptyList(),
+    val includeFiles: List<Path> = emptyList(),
+    val requestedWorkingDirectory: Path? = null,
 )
 
 data class InteractivePromptArgument(
@@ -38,4 +46,5 @@ data class StagedWorkspaceDescriptor(
     val projectRoot: Path,
     val workingDirectory: Path,
     val stagedExternalIncludes: Map<Path, Path>,
+    val stagedExternalFiles: Map<Path, Path>,
 )

@@ -5,6 +5,7 @@ import dev.alehkastsiukovich.llmguard.adapter.InteractiveProviderAdapter
 import dev.alehkastsiukovich.llmguard.adapter.InvocationRequest
 import dev.alehkastsiukovich.llmguard.adapter.ParsedInteractiveArguments
 import dev.alehkastsiukovich.llmguard.adapter.PreparedInvocation
+import dev.alehkastsiukovich.llmguard.adapter.ProviderLaunchMode
 import dev.alehkastsiukovich.llmguard.adapter.ProviderAdapter
 import dev.alehkastsiukovich.llmguard.adapter.StagedWorkspaceDescriptor
 import java.nio.file.Path
@@ -81,6 +82,7 @@ class GeminiCliAdapter : ProviderAdapter, InteractiveProviderAdapter {
         }
 
         return ParsedInteractiveArguments(
+            launchMode = if (prompt == null) ProviderLaunchMode.INTERACTIVE_PROXY else ProviderLaunchMode.DIRECT_PROCESS,
             prompt = prompt,
             includeDirectories = includeDirectories.distinct(),
         )

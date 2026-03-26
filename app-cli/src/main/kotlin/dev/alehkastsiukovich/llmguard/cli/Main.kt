@@ -34,7 +34,7 @@ internal class CliApplication(
     private val policyLoader: PolicyLoader,
     private val guardEngine: GuardEngine,
     private val adapters: Map<String, ProviderAdapter>,
-    private val geminiWrapperCommand: InteractiveProxyCommand,
+    private val interactiveCommands: Map<String, InteractiveProxyCommand>,
 ) {
     fun run(args: List<String>): Int {
         if (args.isEmpty()) {
@@ -42,12 +42,16 @@ internal class CliApplication(
             return 1
         }
 
-        return when (args.first()) {
-            "gemini" -> geminiWrapperCommand.run(args.drop(1))
+        val command = args.first()
+        interactiveCommands[command]?.let { interactiveCommand ->
+            return interactiveCommand.run(args.drop(1))
+        }
+
+        return when (command) {
             "policy" -> runPolicyCommand(args.drop(1))
             "run" -> runProviderCommand(args.drop(1))
             else -> {
-                System.err.println("Unknown command: ${args.first()}")
+                System.err.println("Unknown command: $command")
                 printUsage()
                 1
             }
@@ -95,10 +99,15 @@ internal class CliApplication(
     }
 
     private fun printUsage() {
+        val providerCommands = interactiveCommands.keys
+            .sorted()
+            .joinToString(separator = "\n") { command ->
+                "  llm-guard $command [--guard-* options] [$command args]"
+            }
         println(
             """
             Usage:
-              llm-guard gemini [--guard-* options] [gemini args]
+            $providerCommands
               llm-guard policy validate [path]
               llm-guard policy print-example
               llm-guard run [options] -- <provider command>

@@ -1,6 +1,7 @@
 package dev.alehkastsiukovich.llmguard.cli
 
 import dev.alehkastsiukovich.llmguard.adapter.InteractiveProviderAdapter
+import dev.alehkastsiukovich.llmguard.adapter.ProviderLaunchMode
 import dev.alehkastsiukovich.llmguard.adapter.StagedWorkspaceDescriptor
 import dev.alehkastsiukovich.llmguard.guard.FindingSource
 import dev.alehkastsiukovich.llmguard.guard.GuardEngine
@@ -21,6 +22,7 @@ internal class InteractiveProxyCommand(
     private val providerDisplayName: String,
     private val adapter: InteractiveProviderAdapter,
     private val realExecutableEnvVar: String,
+    private val realExecutableFlags: Set<String>,
     private val policyLoader: PolicyLoader,
     private val guardEngine: GuardEngine,
     private val workspaceStager: WorkspaceStager,
@@ -28,7 +30,10 @@ internal class InteractiveProxyCommand(
     private val environment: Map<String, String>,
 ) {
     fun run(args: List<String>): Int {
-        val wrapperArgs = parseInteractiveProxyArguments(args) ?: return 1
+        val wrapperArgs = parseInteractiveProxyArguments(
+            args = args,
+            realExecutableFlags = realExecutableFlags,
+        ) ?: return 1
         val currentWorkingDirectory = Path("").toAbsolutePath().normalize()
         val policyPath = findPolicyPath(
             explicitPath = wrapperArgs.guardPolicyPath,
@@ -82,11 +87,22 @@ internal class InteractiveProxyCommand(
             return 4
         }
 
+        val externalIncludeDirectories = buildList {
+            addAll(parsedProviderArguments.includeDirectories.filter { !it.startsWith(projectRoot) })
+            parsedProviderArguments.requestedWorkingDirectory
+                ?.takeIf { !it.startsWith(projectRoot) }
+                ?.let(::add)
+        }.distinct()
+        val externalIncludeFiles = parsedProviderArguments.includeFiles
+            .filter { !it.startsWith(projectRoot) }
+            .filterNot { externalFile -> externalIncludeDirectories.any(externalFile::startsWith) }
+
         val workspace = workspaceStager.stage(
             policy = policy,
             projectRoot = projectRoot,
             currentWorkingDirectory = currentWorkingDirectory,
-            externalIncludeDirectories = parsedProviderArguments.includeDirectories.filter { !it.startsWith(projectRoot) },
+            externalIncludeDirectories = externalIncludeDirectories,
+            externalIncludeFiles = externalIncludeFiles,
         )
 
         val workspaceNeedsApproval = workspace.findings.any { it.action == RuleActionType.CONFIRM }
@@ -112,7 +128,7 @@ internal class InteractiveProxyCommand(
         }
 
         val executable = wrapperArgs.guardRealExecutable ?: environment[realExecutableEnvVar] ?: adapter.defaultExecutable
-        if (parsedProviderArguments.prompt == null) {
+        if (parsedProviderArguments.launchMode == ProviderLaunchMode.INTERACTIVE_PROXY) {
             System.err.println("Starting interactive $providerDisplayName proxy session.")
             return sessionRunner.run(
                 config = InteractiveSessionConfig(
@@ -250,7 +266,10 @@ internal data class InteractiveProxyArguments(
     val providerArguments: List<String>,
 )
 
-internal fun parseInteractiveProxyArguments(args: List<String>): InteractiveProxyArguments? {
+internal fun parseInteractiveProxyArguments(
+    args: List<String>,
+    realExecutableFlags: Set<String> = defaultRealExecutableFlags,
+): InteractiveProxyArguments? {
     var index = 0
     var guardPolicyPath: Path? = null
     var guardDryRun = false
@@ -272,9 +291,7 @@ internal fun parseInteractiveProxyArguments(args: List<String>): InteractiveProx
                 guardApprove = true
                 index += 1
             }
-            "--guard-real-executable",
-            "--guard-real-gemini",
-            -> {
+            in realExecutableFlags -> {
                 guardRealExecutable = args.getOrNull(index + 1) ?: return interactiveProxyMissingValue(arg)
                 index += 2
             }
@@ -324,9 +341,15 @@ private val candidatePolicyNames = listOf(
     "llm-policy.yml",
 )
 
+private val defaultRealExecutableFlags = setOf(
+    "--guard-real-executable",
+    "--guard-real-gemini",
+)
+
 private fun StagedWorkspace.toDescriptor(): StagedWorkspaceDescriptor = StagedWorkspaceDescriptor(
     root = root,
     projectRoot = projectRoot,
     workingDirectory = workingDirectory,
     stagedExternalIncludes = stagedExternalIncludes,
+    stagedExternalFiles = stagedExternalFiles,
 )

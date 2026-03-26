@@ -21,6 +21,7 @@ class WorkspaceStager(
         projectRoot: Path,
         currentWorkingDirectory: Path,
         externalIncludeDirectories: List<Path> = emptyList(),
+        externalIncludeFiles: List<Path> = emptyList(),
     ): StagedWorkspace {
         val normalizedProjectRoot = projectRoot.toAbsolutePath().normalize()
         val normalizedCwd = currentWorkingDirectory.toAbsolutePath().normalize()
@@ -42,8 +43,10 @@ class WorkspaceStager(
         blockedFiles += projectMirror.blockedFiles
 
         val stagedExternalIncludes = linkedMapOf<Path, Path>()
-        externalIncludeDirectories.distinct().forEachIndexed { index, directory ->
-            val normalizedExternal = directory.toAbsolutePath().normalize()
+        val normalizedExternalDirectories = externalIncludeDirectories
+            .map { it.toAbsolutePath().normalize() }
+            .distinct()
+        normalizedExternalDirectories.forEachIndexed { index, normalizedExternal ->
             val externalDestination = root / "_external" / "${index + 1}-${sanitizeDirectoryName(normalizedExternal)}"
             val externalMirror = mirrorDirectory(
                 policy = policy,
@@ -58,6 +61,29 @@ class WorkspaceStager(
             stagedExternalIncludes[normalizedExternal] = externalDestination
         }
 
+        val stagedExternalFiles = linkedMapOf<Path, Path>()
+        externalIncludeFiles
+            .map { it.toAbsolutePath().normalize() }
+            .distinct()
+            .filterNot { externalFile ->
+                externalFile.startsWith(normalizedProjectRoot) || normalizedExternalDirectories.any(externalFile::startsWith)
+            }
+            .forEachIndexed { index, normalizedExternalFile ->
+                val stagedExternalFile = root / "_external_files" / "${index + 1}-${sanitizeFileName(normalizedExternalFile)}"
+                val fileMirror = mirrorFile(
+                    policy = policy,
+                    sourceFile = normalizedExternalFile,
+                    destinationFile = stagedExternalFile,
+                    findings = findings,
+                )
+                mirroredFiles += fileMirror.mirroredFiles
+                redactedFiles += fileMirror.redactedFiles
+                blockedFiles += fileMirror.blockedFiles
+                if (fileMirror.mirroredFiles > 0) {
+                    stagedExternalFiles[normalizedExternalFile] = stagedExternalFile
+                }
+            }
+
         val stagedWorkingDirectory = if (normalizedCwd.startsWith(normalizedProjectRoot)) {
             root.resolve(normalizedCwd.relativeTo(normalizedProjectRoot))
         } else {
@@ -70,6 +96,7 @@ class WorkspaceStager(
             projectRoot = normalizedProjectRoot,
             workingDirectory = stagedWorkingDirectory,
             stagedExternalIncludes = stagedExternalIncludes,
+            stagedExternalFiles = stagedExternalFiles,
             mirroredFiles = mirroredFiles,
             redactedFiles = redactedFiles,
             blockedFiles = blockedFiles,
@@ -155,8 +182,63 @@ class WorkspaceStager(
         )
     }
 
+    private fun mirrorFile(
+        policy: LlmGuardPolicy,
+        sourceFile: Path,
+        destinationFile: Path,
+        findings: MutableList<GuardFinding>,
+    ): MirrorStats {
+        require(Files.isRegularFile(sourceFile)) { "External include is not a regular file: $sourceFile" }
+
+        val evaluation = guardEngine.evaluate(
+            policy = policy,
+            request = GuardRequest(
+                projectRoot = sourceFile.parent ?: sourceFile.toAbsolutePath().parent,
+                attachments = listOf(sourceFile),
+            ),
+        )
+        val attachment = evaluation.attachments.single()
+        findings += evaluation.findings
+
+        return when (attachment.disposition) {
+            AttachmentDisposition.BLOCKED -> MirrorStats(
+                mirroredFiles = 0,
+                redactedFiles = 0,
+                blockedFiles = 1,
+            )
+            AttachmentDisposition.COPY_ORIGINAL -> {
+                destinationFile.parent?.createDirectories()
+                Files.copy(
+                    sourceFile,
+                    destinationFile,
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.COPY_ATTRIBUTES,
+                )
+                MirrorStats(
+                    mirroredFiles = 1,
+                    redactedFiles = 0,
+                    blockedFiles = 0,
+                )
+            }
+            AttachmentDisposition.WRITE_SANITIZED_TEXT -> {
+                destinationFile.parent?.createDirectories()
+                Files.writeString(destinationFile, attachment.sanitizedText ?: "")
+                MirrorStats(
+                    mirroredFiles = 1,
+                    redactedFiles = 1,
+                    blockedFiles = 0,
+                )
+            }
+        }
+    }
+
     private fun sanitizeDirectoryName(path: Path): String {
         val name = path.fileName?.toString().orEmpty().ifBlank { "include" }
+        return name.replace(Regex("[^A-Za-z0-9._-]"), "_")
+    }
+
+    private fun sanitizeFileName(path: Path): String {
+        val name = path.fileName?.toString().orEmpty().ifBlank { "file" }
         return name.replace(Regex("[^A-Za-z0-9._-]"), "_")
     }
 
@@ -186,6 +268,7 @@ data class StagedWorkspace(
     val projectRoot: Path,
     val workingDirectory: Path,
     val stagedExternalIncludes: Map<Path, Path>,
+    val stagedExternalFiles: Map<Path, Path>,
     val mirroredFiles: Int,
     val redactedFiles: Int,
     val blockedFiles: Int,

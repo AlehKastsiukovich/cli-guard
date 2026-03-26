@@ -8,6 +8,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(project(":adapter-codex-cli"))
     implementation(project(":adapter-gemini-cli"))
     implementation(project(":adapter-spi"))
     implementation(project(":core-guard"))
