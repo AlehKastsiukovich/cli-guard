@@ -7,8 +7,10 @@ import java.nio.file.Path
 import java.nio.file.SimpleFileVisitor
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.BasicFileAttributes
+import java.security.MessageDigest
 import kotlin.io.path.createDirectories
 import kotlin.io.path.div
+import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
 import kotlin.io.path.name
 import kotlin.io.path.relativeTo
@@ -25,7 +27,7 @@ class WorkspaceStager(
     ): StagedWorkspace {
         val normalizedProjectRoot = projectRoot.toAbsolutePath().normalize()
         val normalizedCwd = currentWorkingDirectory.toAbsolutePath().normalize()
-        val root = Files.createTempDirectory("llm-guard-workspace-")
+        val root = prepareStableWorkspaceRoot(normalizedProjectRoot)
         val findings = mutableListOf<GuardFinding>()
         var mirroredFiles = 0
         var redactedFiles = 0
@@ -232,6 +234,54 @@ class WorkspaceStager(
         }
     }
 
+    private fun prepareStableWorkspaceRoot(projectRoot: Path): Path {
+        val baseDirectory = Path.of(System.getProperty("java.io.tmpdir"), stableWorkspaceDirectoryName)
+        baseDirectory.createDirectories()
+
+        val root = baseDirectory.resolve(stableWorkspaceName(projectRoot))
+        clearDirectory(root)
+        root.createDirectories()
+        return root
+    }
+
+    private fun clearDirectory(path: Path) {
+        if (!path.exists()) {
+            return
+        }
+
+        Files.walkFileTree(
+            path,
+            object : SimpleFileVisitor<Path>() {
+                override fun visitFile(
+                    file: Path,
+                    attrs: BasicFileAttributes,
+                ): FileVisitResult {
+                    Files.deleteIfExists(file)
+                    return FileVisitResult.CONTINUE
+                }
+
+                override fun postVisitDirectory(
+                    dir: Path,
+                    exc: java.io.IOException?,
+                ): FileVisitResult {
+                    if (dir != path) {
+                        Files.deleteIfExists(dir)
+                    }
+                    return FileVisitResult.CONTINUE
+                }
+            },
+        )
+    }
+
+    private fun stableWorkspaceName(projectRoot: Path): String {
+        val projectName = sanitizeDirectoryName(projectRoot)
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(projectRoot.toString().toByteArray(Charsets.UTF_8))
+            .joinToString(separator = "") { byte -> "%02x".format(byte) }
+            .take(12)
+        return "$projectName-$digest"
+    }
+
     private fun sanitizeDirectoryName(path: Path): String {
         val name = path.fileName?.toString().orEmpty().ifBlank { "include" }
         return name.replace(Regex("[^A-Za-z0-9._-]"), "_")
@@ -252,6 +302,8 @@ class WorkspaceStager(
     )
 
     private companion object {
+        private const val stableWorkspaceDirectoryName = "llm-guard-workspaces"
+
         private val skippedDirectoryNames = setOf(
             ".git",
             ".gradle",

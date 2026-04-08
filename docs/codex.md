@@ -55,26 +55,16 @@ Set-Location $LlmGuardRepo
 .\gradlew.bat :app-cli:installDist
 ```
 
-Create a wrapper directory:
+Install the Codex wrapper:
 
 ```powershell
-New-Item -ItemType Directory -Force "$HOME\bin" | Out-Null
+powershell -ExecutionPolicy Bypass -File .\scripts\install-codex-wrapper.ps1
 ```
 
-Find the real Codex executable:
+If `codex` is not already in `PATH`, pass it explicitly:
 
 ```powershell
-$RealCodex = (Get-Command codex).Source
-```
-
-Create `codex.cmd` in `$HOME\bin`:
-
-```powershell
-@"
-@echo off
-set "LLM_GUARD_REAL_CODEX=$RealCodex"
-call "$LlmGuardRepo\app-cli\build\install\llm-guard\bin\llm-guard.bat" codex %*
-"@ | Set-Content "$HOME\bin\codex.cmd"
+powershell -ExecutionPolicy Bypass -File .\scripts\install-codex-wrapper.ps1 -RealCodex "C:\path\to\codex.exe"
 ```
 
 Add `$HOME\bin` to `PATH` and reopen the terminal.

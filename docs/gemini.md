@@ -60,26 +60,16 @@ Set-Location $LlmGuardRepo
 .\gradlew.bat :app-cli:installDist
 ```
 
-Create a wrapper directory:
+Install the Gemini wrapper:
 
 ```powershell
-New-Item -ItemType Directory -Force "$HOME\bin" | Out-Null
+powershell -ExecutionPolicy Bypass -File .\scripts\install-gemini-wrapper.ps1
 ```
 
-Find the real Gemini executable:
+If `gemini` is not already in `PATH`, pass it explicitly:
 
 ```powershell
-$RealGemini = (Get-Command gemini).Source
-```
-
-Create `gemini.cmd` in `$HOME\bin`:
-
-```powershell
-@"
-@echo off
-set "LLM_GUARD_REAL_GEMINI=$RealGemini"
-call "$LlmGuardRepo\app-cli\build\install\llm-guard\bin\llm-guard.bat" gemini %*
-"@ | Set-Content "$HOME\bin\gemini.cmd"
+powershell -ExecutionPolicy Bypass -File .\scripts\install-gemini-wrapper.ps1 -RealGemini "C:\path\to\gemini.ps1"
 ```
 
 Add `$HOME\bin` to `PATH` and reopen the terminal.
@@ -97,9 +87,9 @@ gemini
 
 If you want to verify the wrapper logic locally before using the real Gemini backend:
 
-```bash
-./gradlew :app-cli:installDist
-./scripts/smoke-test-gemini-wrapper.sh
+```powershell
+.\gradlew.bat :app-cli:installDist
+bash ./scripts/smoke-test-gemini-wrapper.sh
 ```
 
 This runs a fake `gemini` executable behind `llm-guard` and checks that:

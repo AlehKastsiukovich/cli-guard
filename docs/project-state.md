@@ -61,8 +61,12 @@ Current product direction:
 
 - macOS/Linux Gemini wrapper install script:
   - [scripts/install-gemini-wrapper.sh](/Users/alehkastsiukovich/Development/AI/SecretsScanner/scripts/install-gemini-wrapper.sh)
+- Windows Gemini wrapper install script:
+  - [scripts/install-gemini-wrapper.ps1](/Users/alehkastsiukovich/Development/AI/SecretsScanner/scripts/install-gemini-wrapper.ps1)
 - macOS/Linux Codex wrapper install script:
   - [scripts/install-codex-wrapper.sh](/Users/alehkastsiukovich/Development/AI/SecretsScanner/scripts/install-codex-wrapper.sh)
+- Windows Codex wrapper install script:
+  - [scripts/install-codex-wrapper.ps1](/Users/alehkastsiukovich/Development/AI/SecretsScanner/scripts/install-codex-wrapper.ps1)
 - Windows setup instructions documented in provider guides
 
 ## Documentation Layout

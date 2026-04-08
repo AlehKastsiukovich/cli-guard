@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
+import kotlin.io.path.invariantSeparatorsPathString
 
 class GuardEngineTest {
     private val engine = GuardEngine()
@@ -125,6 +126,6 @@ class GuardEngineTest {
             ),
         )
 
-        assertEquals("_external/Payment.kt", result.attachments.single().relativePath.toString())
+        assertEquals("_external/Payment.kt", result.attachments.single().relativePath.invariantSeparatorsPathString)
     }
 }

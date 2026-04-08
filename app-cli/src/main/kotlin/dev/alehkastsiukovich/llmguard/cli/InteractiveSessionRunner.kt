@@ -1,6 +1,10 @@
 package dev.alehkastsiukovich.llmguard.cli
 
 import com.pty4j.PtyProcessBuilder
+import java.util.Locale
+import java.lang.ProcessBuilder
+import kotlin.io.path.Path
+import kotlin.io.path.extension
 import kotlin.concurrent.thread
 
 internal interface InteractiveSessionRunner {
@@ -22,13 +26,17 @@ internal class PtySessionRunner : InteractiveSessionRunner {
         config: InteractiveSessionConfig,
         inputTransformer: (String) -> String?,
     ): Int {
+        if (isWindows()) {
+            return runWithoutPty(config)
+        }
+
         val environment = HashMap(System.getenv()).apply {
             putAll(config.environment)
             putIfAbsent("TERM", "xterm-256color")
         }
 
         val process = PtyProcessBuilder()
-            .setCommand((listOf(config.executable) + config.arguments).toTypedArray())
+            .setCommand(resolveCommand(config).toTypedArray())
             .setDirectory(config.workingDirectory.toString())
             .setEnvironment(environment)
             .start()
@@ -72,4 +80,46 @@ internal class PtySessionRunner : InteractiveSessionRunner {
         }
         return exitCode
     }
+
+    private fun runWithoutPty(config: InteractiveSessionConfig): Int {
+        val processBuilder = ProcessBuilder(resolveCommand(config))
+            .directory(config.workingDirectory.toFile())
+            .redirectInput(ProcessBuilder.Redirect.INHERIT)
+            .redirectOutput(ProcessBuilder.Redirect.INHERIT)
+            .redirectError(ProcessBuilder.Redirect.INHERIT)
+
+        processBuilder.environment().putAll(config.environment)
+        val process = processBuilder.start()
+        return process.waitFor()
+    }
+
+    private fun resolveCommand(config: InteractiveSessionConfig): List<String> {
+        val executablePath = Path(config.executable)
+        if (!isWindows()) {
+            return listOf(config.executable) + config.arguments
+        }
+
+        return when (executablePath.extension.lowercase(Locale.ROOT)) {
+            "ps1" -> listOf(
+                "powershell.exe",
+                "-NoLogo",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                executablePath.toString(),
+            ) + config.arguments
+            "cmd",
+            "bat",
+            -> listOf(
+                "cmd.exe",
+                "/c",
+                executablePath.toString(),
+            ) + config.arguments
+            else -> listOf(config.executable) + config.arguments
+        }
+    }
+
+    private fun isWindows(): Boolean =
+        System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
 }
