@@ -22,7 +22,9 @@ Each guide has separate `macOS` and `Windows` setup instructions.
 What `llm-guard` does automatically:
 
 - finds `llm-policy.yaml` by walking up from the current directory
-- stages a sanitized mirror of the project into a temporary workspace
+- builds a sanitized overlay workspace in a temporary directory
+- reuses cached file decisions for unchanged files between launches
+- keeps safe files as live pass-through links when possible
 - removes blocked files and rewrites redacted files before the provider can read them
 - sanitizes supported prompt arguments before launch
 - can proxy interactive CLI sessions through PTY
@@ -38,6 +40,11 @@ Provider-specific aliases also exist:
 
 - `--guard-real-gemini <path>`
 - `--guard-real-codex <path>`
+
+Optional local detector backends:
+
+- `LLM_GUARD_PRIVACY_FILTER_BIN`: explicit path to the local `opf` executable
+- `LLM_GUARD_GITLEAKS_BIN`: explicit path to the local `gitleaks` executable
 
 ## Project Layout
 

@@ -29,7 +29,10 @@ Current product direction:
 
 ### Workspace Protection
 
-- sanitized workspace staging into a temporary directory
+- sanitized overlay workspace in a temporary directory
+- incremental stage cache for unchanged file decisions between launches
+- safe files materialized as live pass-through links when the platform allows it
+- fully safe subtrees materialized as directory-level pass-through links when possible
 - blocked files omitted from staged workspace
 - redacted files rewritten before provider launch
 - support for staging:
@@ -56,6 +59,13 @@ Current product direction:
   - interactive Codex wrapper flow
   - headless `exec` support
   - path argument rewrite for `-C`, `--add-dir`, `-i`
+
+### Prompt-Time Text Security
+
+- pluggable text sanitizer backend contract in `core-guard`
+- optional `privacy-filter` backend via local `opf`
+- optional `gitleaks` backend via local `gitleaks`
+- integrated into prompt and interactive text evaluation flow
 
 ### Installation Helpers
 
@@ -87,10 +97,17 @@ Confirmed locally:
 - Gemini smoke test passes through fake provider wrapper:
   - [scripts/smoke-test-gemini-wrapper.sh](/Users/alehkastsiukovich/Development/AI/SecretsScanner/scripts/smoke-test-gemini-wrapper.sh)
 - sanitized workspace is created
+- repeated runs reuse cached decisions for unchanged files
 - redacted Kotlin file is rewritten before provider execution
 - provider process is started from staged workspace, not original repo
 - guard summary is printed before provider execution
 - Codex `exec` contract was exercised earlier in this environment
+
+Not yet re-verified after the latest text-sanitizer integration in this restricted sandbox:
+
+- full Gradle compile/test pass
+- live execution with real installed `opf`
+- live execution with real installed `gitleaks`
 
 ## Known Limitations
 

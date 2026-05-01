@@ -51,5 +51,5 @@ data class GuardFinding(
 enum class FindingSource {
     POLICY_RULE,
     SECRET_DETECTOR,
+    TEXT_SANITIZER_BACKEND,
 }
-

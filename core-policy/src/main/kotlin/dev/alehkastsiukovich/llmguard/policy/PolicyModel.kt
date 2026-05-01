@@ -17,6 +17,8 @@ data class PolicyDefaults(
 data class DetectorConfig(
     val secrets: DetectorToggle = DetectorToggle(),
     val kotlinSymbols: DetectorToggle = DetectorToggle(enabled = false),
+    val privacyFilter: DetectorToggle = DetectorToggle(enabled = false),
+    val gitleaks: DetectorToggle = DetectorToggle(enabled = false, action = RuleActionType.BLOCK),
 )
 
 data class DetectorToggle(

@@ -8,6 +8,12 @@ detectors:
     action: redact
   kotlin_symbols:
     enabled: true
+  privacy_filter:
+    enabled: false
+    action: redact
+  gitleaks:
+    enabled: false
+    action: block
 rules:
   - id: block-secret-files
     description: Block Android and credential files from leaving the machine.
@@ -47,4 +53,3 @@ rules:
         - "ENV_[A-Z0-9_]+"
     action:
       type: confirm
-

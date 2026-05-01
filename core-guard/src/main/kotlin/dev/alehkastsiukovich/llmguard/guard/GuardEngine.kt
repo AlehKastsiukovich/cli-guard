@@ -18,11 +18,24 @@ import kotlin.io.path.name
 class GuardEngine internal constructor(
     private val secretDetector: SecretDetector,
     private val kotlinSymbolRedactor: KotlinSymbolRedactor,
+    private val textSanitizerBackends: List<TextSanitizerBackend>,
 ) {
     constructor() : this(
         secretDetector = SecretDetector(),
         kotlinSymbolRedactor = KotlinSymbolRedactor(),
+        textSanitizerBackends = emptyList(),
     )
+
+    companion object {
+        fun withDefaultTextSanitizers(environment: Map<String, String>): GuardEngine = GuardEngine(
+            secretDetector = SecretDetector(),
+            kotlinSymbolRedactor = KotlinSymbolRedactor(),
+            textSanitizerBackends = listOf(
+                GitleaksTextSanitizerBackend(environment),
+                PrivacyFilterTextSanitizerBackend(environment),
+            ),
+        )
+    }
 
     fun evaluate(
         policy: LlmGuardPolicy,
@@ -284,7 +297,86 @@ class GuardEngine internal constructor(
             }
         }
 
+        textSanitizerBackends.forEach { backend ->
+            val detectorConfig = backend.config(policy.detectors)
+            if (!detectorConfig.enabled) {
+                return@forEach
+            }
+
+            val backendResult = backend.sanitize(
+                TextSanitizerRequest(
+                    target = target,
+                    content = current,
+                ),
+            ) ?: return@forEach
+
+            val hasMatches = backendResult.redactedText != null || backendResult.matchedValues.isNotEmpty()
+            if (!hasMatches) {
+                return@forEach
+            }
+
+            when (detectorConfig.action) {
+                RuleActionType.ALLOW -> Unit
+                RuleActionType.BLOCK,
+                RuleActionType.CONFIRM,
+                -> findings += GuardFinding(
+                    target = target,
+                    action = detectorConfig.action,
+                    source = FindingSource.TEXT_SANITIZER_BACKEND,
+                    message = backendResult.summary ?: "Detected sensitive text via ${backend.id}",
+                    ruleId = backend.id,
+                )
+                RuleActionType.REDACT -> {
+                    val redacted = backendResult.redactedText ?: redactMatchedValues(
+                        content = current,
+                        matchedValues = backendResult.matchedValues,
+                        replacement = policy.defaults.redactReplacement,
+                    )
+                    if (redacted != current) {
+                        current = redacted
+                        findings += GuardFinding(
+                            target = target,
+                            action = RuleActionType.REDACT,
+                            source = FindingSource.TEXT_SANITIZER_BACKEND,
+                            message = backendResult.summary ?: "Redacted sensitive text via ${backend.id}",
+                            ruleId = backend.id,
+                        )
+                    }
+                }
+                RuleActionType.SUMMARIZE -> {
+                    current = "<summarized:${backend.id}>"
+                    findings += GuardFinding(
+                        target = target,
+                        action = RuleActionType.SUMMARIZE,
+                        source = FindingSource.TEXT_SANITIZER_BACKEND,
+                        message = backendResult.summary ?: "Summarized content via ${backend.id}",
+                        ruleId = backend.id,
+                    )
+                }
+            }
+        }
+
         return TextEvaluation(current, findings)
+    }
+
+    private fun redactMatchedValues(
+        content: String,
+        matchedValues: List<String>,
+        replacement: String,
+    ): String {
+        if (matchedValues.isEmpty()) {
+            return content
+        }
+
+        var current = content
+        matchedValues
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sortedByDescending { it.length }
+            .forEach { matchedValue ->
+                current = current.replace(matchedValue, replacement)
+            }
+        return current
     }
 
     private fun matchesRule(

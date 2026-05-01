@@ -392,6 +392,7 @@ internal class CliApplication(
                 val source = when (finding.source) {
                     FindingSource.POLICY_RULE -> finding.ruleId ?: "policy"
                     FindingSource.SECRET_DETECTOR -> "secret-detector"
+                    FindingSource.TEXT_SANITIZER_BACKEND -> finding.ruleId ?: "text-sanitizer"
                 }
                 System.err.println("    - [${finding.action.name.lowercase()}] ${finding.target} via $source: ${finding.message}")
             }
@@ -452,6 +453,12 @@ detectors:
     action: redact
   kotlin_symbols:
     enabled: true
+  privacy_filter:
+    enabled: false
+    action: redact
+  gitleaks:
+    enabled: false
+    action: block
 rules:
   - id: block-secret-files
     description: Block common Android and credential files.

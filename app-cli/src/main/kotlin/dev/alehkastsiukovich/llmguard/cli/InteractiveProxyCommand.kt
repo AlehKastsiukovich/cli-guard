@@ -216,6 +216,7 @@ internal class InteractiveProxyCommand(
             val source = when (finding.source) {
                 FindingSource.POLICY_RULE -> finding.ruleId ?: "policy"
                 FindingSource.SECRET_DETECTOR -> "secret-detector"
+                FindingSource.TEXT_SANITIZER_BACKEND -> finding.ruleId ?: "text-sanitizer"
             }
             System.err.println("  - [${finding.action.name.lowercase()}] via $source: ${finding.message}")
         }
@@ -233,6 +234,8 @@ internal class InteractiveProxyCommand(
         System.err.println("  Working directory: ${currentWorkingDirectory.toAbsolutePath()}")
         System.err.println("  Staged workspace: ${workspace.root}")
         System.err.println("  Files mirrored: ${workspace.mirroredFiles}")
+        System.err.println("  Files reused from cache: ${workspace.cacheHits}")
+        System.err.println("  Files pass-through: ${workspace.passThroughFiles}")
         System.err.println("  Files redacted: ${workspace.redactedFiles}")
         System.err.println("  Files blocked: ${workspace.blockedFiles}")
         promptEvaluation?.prompt?.let { prompt ->
@@ -248,6 +251,7 @@ internal class InteractiveProxyCommand(
                 val source = when (finding.source) {
                     FindingSource.POLICY_RULE -> finding.ruleId ?: "policy"
                     FindingSource.SECRET_DETECTOR -> "secret-detector"
+                    FindingSource.TEXT_SANITIZER_BACKEND -> finding.ruleId ?: "text-sanitizer"
                 }
                 System.err.println("    - [${finding.action.name.lowercase()}] ${finding.target} via $source")
             }

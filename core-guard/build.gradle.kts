@@ -8,6 +8,7 @@ kotlin {
 
 dependencies {
     implementation(project(":core-policy"))
+    implementation(libs.jackson.module.kotlin)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
@@ -17,4 +18,3 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
 }
-

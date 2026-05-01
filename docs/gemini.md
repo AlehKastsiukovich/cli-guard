@@ -131,6 +131,13 @@ If your input was blocked:
 - `--guard-policy <path>`: override policy discovery
 - `--guard-real-gemini <path>`: explicit path to the real Gemini executable
 
+Optional local detector backends:
+
+- `LLM_GUARD_PRIVACY_FILTER_BIN`: explicit path to the local `opf` executable
+- `LLM_GUARD_GITLEAKS_BIN`: explicit path to the local `gitleaks` executable
+
+If these are set and the corresponding detector is enabled in `llm-policy.yaml`, prompt and interactive text can be sanitized on the fly before forwarding to Gemini.
+
 ## Direct Invocation
 
 If you do not want to override the shell command yet:

@@ -1,12 +1,14 @@
 package dev.alehkastsiukovich.llmguard.guard
 
+import dev.alehkastsiukovich.llmguard.policy.DetectorConfig
+import dev.alehkastsiukovich.llmguard.policy.DetectorToggle
+import dev.alehkastsiukovich.llmguard.policy.KotlinSymbolCriteria
 import dev.alehkastsiukovich.llmguard.policy.LlmGuardPolicy
 import dev.alehkastsiukovich.llmguard.policy.MatchCriteria
 import dev.alehkastsiukovich.llmguard.policy.PolicyDefaults
 import dev.alehkastsiukovich.llmguard.policy.PolicyRule
 import dev.alehkastsiukovich.llmguard.policy.RuleAction
 import dev.alehkastsiukovich.llmguard.policy.RuleActionType
-import dev.alehkastsiukovich.llmguard.policy.KotlinSymbolCriteria
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -127,5 +129,44 @@ class GuardEngineTest {
         )
 
         assertEquals("_external/Payment.kt", result.attachments.single().relativePath.invariantSeparatorsPathString)
+    }
+
+    @Test
+    fun `redacts prompt using external text sanitizer backend`() {
+        val engine = GuardEngine(
+            secretDetector = SecretDetector(),
+            kotlinSymbolRedactor = KotlinSymbolRedactor(),
+            textSanitizerBackends = listOf(
+                object : TextSanitizerBackend {
+                    override val id: String = "privacy-filter"
+
+                    override fun config(detectors: DetectorConfig): DetectorToggle = detectors.privacyFilter
+
+                    override fun sanitize(request: TextSanitizerRequest): TextSanitizerResult = TextSanitizerResult(
+                        redactedText = request.content.replace("John", "<redacted>"),
+                        matchedValues = listOf("John"),
+                        summary = "Detected PII",
+                    )
+                },
+            ),
+        )
+
+        val result = engine.evaluate(
+            policy = LlmGuardPolicy(
+                version = 1,
+                detectors = DetectorConfig(
+                    secrets = DetectorToggle(enabled = false),
+                    privacyFilter = DetectorToggle(enabled = true, action = RuleActionType.REDACT),
+                ),
+            ),
+            request = GuardRequest(
+                projectRoot = Files.createTempDirectory("llm-guard-test"),
+                prompt = GuardPrompt("Hello John"),
+            ),
+        )
+
+        assertEquals("Hello <redacted>", result.prompt!!.content)
+        assertTrue(result.prompt.wasRedacted)
+        assertTrue(result.findings.any { it.source == FindingSource.TEXT_SANITIZER_BACKEND })
     }
 }

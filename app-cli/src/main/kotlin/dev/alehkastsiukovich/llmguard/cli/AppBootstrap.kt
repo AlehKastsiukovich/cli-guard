@@ -10,7 +10,7 @@ import dev.alehkastsiukovich.llmguard.policy.YamlPolicyLoader
 internal object AppBootstrap {
     fun create(environment: Map<String, String> = System.getenv()): CliApplication {
         val policyLoader = YamlPolicyLoader()
-        val guardEngine = GuardEngine()
+        val guardEngine = GuardEngine.withDefaultTextSanitizers(environment)
         val workspaceStager = WorkspaceStager(guardEngine)
         val geminiAdapter = GeminiCliAdapter()
         val codexAdapter = CodexCliAdapter()
