@@ -124,6 +124,21 @@ If your input was blocked:
 [llm-guard] interactive input blocked and was not forwarded.
 ```
 
+If files change while `gemini` is already running, the wrapper also prints live sync updates in the same terminal.
+
+Example:
+
+```text
+[llm-guard] live workspace sync active for gemini.
+[llm-guard] live sync updated src: redacted, cacheHits=0.
+```
+
+This means:
+
+- safe file changes can be reflected during the running session
+- if a previously safe subtree becomes sensitive, the staged overlay is replaced with a sanitized version
+- if a redacted subtree becomes safe again, it can return to pass-through mode
+
 ## Wrapper Flags
 
 - `--guard-dry-run`: stage and print the summary without starting Gemini

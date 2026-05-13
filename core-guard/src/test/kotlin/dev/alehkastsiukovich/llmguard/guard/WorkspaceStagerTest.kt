@@ -285,4 +285,141 @@ class WorkspaceStagerTest {
         assertEquals(0, secondStage.cacheHits)
         assertTrue(Files.readString(secondStage.root.resolve("src/Payment.kt")).contains("<redacted:kotlin>"))
     }
+
+    @Test
+    fun `live sync replaces pass through subtree when a safe file becomes redacted`() {
+        val projectRoot = Files.createTempDirectory("llm-guard-stage-root")
+        val sourceFile = projectRoot.resolve("src/Payment.kt")
+        Files.createDirectories(sourceFile.parent)
+        Files.writeString(
+            sourceFile,
+            """
+            package com.company.billing.internal
+
+            class PaymentDetails {
+                fun keep(input: String): String = input
+            }
+            """.trimIndent(),
+        )
+        val policy = kotlinRedactionPolicy()
+
+        val workspaceStager = WorkspaceStager()
+        val workspace = workspaceStager.stage(
+            policy = policy,
+            projectRoot = projectRoot,
+            currentWorkingDirectory = projectRoot,
+        )
+
+        val stagedDirectory = workspace.root.resolve("src")
+        assumeTrue(Files.isSymbolicLink(stagedDirectory), "Symbolic links are not supported in this environment")
+
+        Files.writeString(
+            sourceFile,
+            """
+            package com.company.billing.internal
+
+            class PaymentSignatureGenerator {
+                fun generateHmac(input: String): String = input.reversed()
+            }
+            """.trimIndent(),
+        )
+        Files.setLastModifiedTime(sourceFile, FileTime.fromMillis(System.currentTimeMillis() + 1_000))
+
+        val syncResult = workspaceStager.synchronizeSourceRoot(
+            policy = policy,
+            cacheProjectRoot = projectRoot,
+            evaluationRoot = projectRoot,
+            sourceRoot = projectRoot,
+            stagedRoot = workspace.root,
+            changedPath = sourceFile,
+        )
+
+        assertEquals(WorkspaceSyncAction.UPDATED, syncResult.action)
+        assertFalse(Files.isSymbolicLink(stagedDirectory))
+        assertTrue(Files.readString(workspace.root.resolve("src/Payment.kt")).contains("<redacted:kotlin>"))
+        assertEquals(1, syncResult.redactedFiles)
+    }
+
+    @Test
+    fun `live sync restores pass through subtree when a redacted file becomes safe`() {
+        val projectRoot = Files.createTempDirectory("llm-guard-stage-root")
+        val sourceFile = projectRoot.resolve("src/Payment.kt")
+        Files.createDirectories(sourceFile.parent)
+        Files.writeString(
+            sourceFile,
+            """
+            package com.company.billing.internal
+
+            class PaymentSignatureGenerator {
+                fun generateHmac(input: String): String = input.reversed()
+            }
+            """.trimIndent(),
+        )
+        val policy = kotlinRedactionPolicy()
+
+        val workspaceStager = WorkspaceStager()
+        val workspace = workspaceStager.stage(
+            policy = policy,
+            projectRoot = projectRoot,
+            currentWorkingDirectory = projectRoot,
+        )
+
+        val stagedDirectory = workspace.root.resolve("src")
+        assertFalse(Files.isSymbolicLink(stagedDirectory))
+
+        Files.writeString(
+            sourceFile,
+            """
+            package com.company.billing.internal
+
+            class PaymentDetails {
+                fun keep(input: String): String = input
+            }
+            """.trimIndent(),
+        )
+        Files.setLastModifiedTime(sourceFile, FileTime.fromMillis(System.currentTimeMillis() + 1_000))
+
+        val syncResult = workspaceStager.synchronizeSourceRoot(
+            policy = policy,
+            cacheProjectRoot = projectRoot,
+            evaluationRoot = projectRoot,
+            sourceRoot = projectRoot,
+            stagedRoot = workspace.root,
+            changedPath = sourceFile,
+        )
+
+        assumeTrue(Files.isSymbolicLink(stagedDirectory), "Symbolic links are not supported in this environment")
+        assertEquals(WorkspaceSyncAction.UPDATED, syncResult.action)
+        assertEquals(1, syncResult.passThroughFiles)
+        assertEquals(
+            """
+            package com.company.billing.internal
+
+            class PaymentDetails {
+                fun keep(input: String): String = input
+            }
+            """.trimIndent(),
+            Files.readString(workspace.root.resolve("src/Payment.kt")),
+        )
+    }
+
+    private fun kotlinRedactionPolicy(): LlmGuardPolicy = LlmGuardPolicy(
+        version = 1,
+        rules = listOf(
+            PolicyRule(
+                id = "redact-symbols",
+                match = MatchCriteria(
+                    kotlin = KotlinSymbolCriteria(
+                        packages = listOf("com.company.billing.internal"),
+                        classes = listOf("PaymentSignatureGenerator"),
+                        functions = listOf("generateHmac"),
+                    ),
+                ),
+                action = RuleAction(
+                    type = RuleActionType.REDACT,
+                    replacement = "<redacted:kotlin>",
+                ),
+            ),
+        ),
+    )
 }

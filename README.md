@@ -25,6 +25,7 @@ What `llm-guard` does automatically:
 - builds a sanitized overlay workspace in a temporary directory
 - reuses cached file decisions for unchanged files between launches
 - keeps safe files as live pass-through links when possible
+- refreshes staged project content during a running provider session when source files change
 - removes blocked files and rewrites redacted files before the provider can read them
 - sanitizes supported prompt arguments before launch
 - can proxy interactive CLI sessions through PTY

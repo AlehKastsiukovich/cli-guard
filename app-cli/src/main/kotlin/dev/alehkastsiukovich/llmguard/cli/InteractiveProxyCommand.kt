@@ -128,31 +128,42 @@ internal class InteractiveProxyCommand(
         }
 
         val executable = wrapperArgs.guardRealExecutable ?: environment[realExecutableEnvVar] ?: adapter.defaultExecutable
+        val liveSyncSession = WorkspaceLiveSyncSession(
+            providerDisplayName = providerDisplayName,
+            policy = policy,
+            workspace = workspace,
+            workspaceStager = workspaceStager,
+        )
         if (parsedProviderArguments.launchMode == ProviderLaunchMode.INTERACTIVE_PROXY) {
-            System.err.println("Starting interactive $providerDisplayName proxy session.")
-            return sessionRunner.run(
-                config = InteractiveSessionConfig(
-                    executable = executable,
-                    arguments = preparedArguments,
-                    workingDirectory = workspace.workingDirectory,
-                    environment = mapOf(
-                        "LLM_GUARD_POLICY" to policyPath.toAbsolutePath().toString(),
-                        "LLM_GUARD_STAGE_DIR" to workspace.root.toString(),
+            liveSyncSession.start()
+            try {
+                System.err.println("Starting interactive $providerDisplayName proxy session.")
+                return sessionRunner.run(
+                    config = InteractiveSessionConfig(
+                        executable = executable,
+                        arguments = preparedArguments,
+                        workingDirectory = workspace.workingDirectory,
+                        environment = mapOf(
+                            "LLM_GUARD_POLICY" to policyPath.toAbsolutePath().toString(),
+                            "LLM_GUARD_STAGE_DIR" to workspace.root.toString(),
+                        ),
                     ),
-                ),
-                inputTransformer = { input ->
-                    if (!adapter.shouldSanitizeInteractiveInput(input)) {
-                        input
-                    } else {
-                        transformInteractiveInput(
-                            input = input,
-                            policy = policy,
-                            projectRoot = projectRoot,
-                            guardApprove = wrapperArgs.guardApprove,
-                        )
-                    }
-                },
-            )
+                    inputTransformer = { input ->
+                        if (!adapter.shouldSanitizeInteractiveInput(input)) {
+                            input
+                        } else {
+                            transformInteractiveInput(
+                                input = input,
+                                policy = policy,
+                                projectRoot = projectRoot,
+                                guardApprove = wrapperArgs.guardApprove,
+                            )
+                        }
+                    },
+                )
+            } finally {
+                liveSyncSession.close()
+            }
         }
 
         val processBuilder = ProcessBuilder(listOf(executable) + preparedArguments)
@@ -165,7 +176,12 @@ internal class InteractiveProxyCommand(
         processEnvironment["LLM_GUARD_POLICY"] = policyPath.toAbsolutePath().toString()
         processEnvironment["LLM_GUARD_STAGE_DIR"] = workspace.root.toString()
 
-        return processBuilder.start().waitFor()
+        liveSyncSession.start()
+        return try {
+            processBuilder.start().waitFor()
+        } finally {
+            liveSyncSession.close()
+        }
     }
 
     private fun transformInteractiveInput(

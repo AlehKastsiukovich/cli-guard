@@ -33,6 +33,7 @@ Current product direction:
 - incremental stage cache for unchanged file decisions between launches
 - safe files materialized as live pass-through links when the platform allows it
 - fully safe subtrees materialized as directory-level pass-through links when possible
+- live subtree resync during a running provider session when source files change
 - blocked files omitted from staged workspace
 - redacted files rewritten before provider launch
 - support for staging:
@@ -98,6 +99,7 @@ Confirmed locally:
   - [scripts/smoke-test-gemini-wrapper.sh](/Users/alehkastsiukovich/Development/AI/SecretsScanner/scripts/smoke-test-gemini-wrapper.sh)
 - sanitized workspace is created
 - repeated runs reuse cached decisions for unchanged files
+- live subtree resync updates staged content when project files change during the session
 - redacted Kotlin file is rewritten before provider execution
 - provider process is started from staged workspace, not original repo
 - guard summary is printed before provider execution

@@ -133,6 +133,66 @@ class WorkspaceStager(
         )
     }
 
+    fun synchronizeSourceRoot(
+        policy: LlmGuardPolicy,
+        cacheProjectRoot: Path,
+        evaluationRoot: Path,
+        sourceRoot: Path,
+        stagedRoot: Path,
+        changedPath: Path,
+    ): WorkspaceSyncResult {
+        val normalizedChangedPath = changedPath.toAbsolutePath().normalize()
+        val normalizedSourceRoot = sourceRoot.toAbsolutePath().normalize()
+        if (!normalizedChangedPath.startsWith(normalizedSourceRoot)) {
+            return WorkspaceSyncResult(
+                targetSourcePath = normalizedChangedPath,
+                targetStagedPath = stagedRoot,
+                action = WorkspaceSyncAction.IGNORED,
+            )
+        }
+
+        val relativePath = normalizedSourceRoot.relativize(normalizedChangedPath)
+        val targetSourcePath = when {
+            relativePath.nameCount == 0 -> normalizedSourceRoot
+            else -> normalizedSourceRoot.resolve(relativePath.getName(0))
+        }
+        if (relativePath.nameCount > 0 && targetSourcePath.fileName?.toString() in skippedDirectoryNames) {
+            return WorkspaceSyncResult(
+                targetSourcePath = targetSourcePath,
+                targetStagedPath = stagedRoot.resolve(relativePath.getName(0).toString()),
+                action = WorkspaceSyncAction.IGNORED,
+            )
+        }
+
+        val targetStagedPath = if (relativePath.nameCount == 0) {
+            stagedRoot
+        } else {
+            stagedRoot.resolve(relativePath.getName(0).toString())
+        }
+
+        return synchronizeTarget(
+            policy = policy,
+            cacheProjectRoot = cacheProjectRoot,
+            evaluationRoot = evaluationRoot,
+            targetSourcePath = targetSourcePath,
+            targetStagedPath = targetStagedPath,
+        )
+    }
+
+    fun synchronizeExternalFile(
+        policy: LlmGuardPolicy,
+        cacheProjectRoot: Path,
+        evaluationRoot: Path,
+        sourceFile: Path,
+        stagedFile: Path,
+    ): WorkspaceSyncResult = synchronizeTarget(
+        policy = policy,
+        cacheProjectRoot = cacheProjectRoot,
+        evaluationRoot = evaluationRoot,
+        targetSourcePath = sourceFile.toAbsolutePath().normalize(),
+        targetStagedPath = stagedFile,
+    )
+
     private fun mirrorDirectory(
         policy: LlmGuardPolicy,
         evaluationRoot: Path,
@@ -405,6 +465,97 @@ class WorkspaceStager(
         )
     }
 
+    private fun synchronizeTarget(
+        policy: LlmGuardPolicy,
+        cacheProjectRoot: Path,
+        evaluationRoot: Path,
+        targetSourcePath: Path,
+        targetStagedPath: Path,
+    ): WorkspaceSyncResult {
+        val findings = mutableListOf<GuardFinding>()
+        val cacheContext = loadStageCacheContext(cacheProjectRoot, policy)
+        val result = when {
+            !targetSourcePath.exists(LinkOption.NOFOLLOW_LINKS) -> {
+                removeCachedEntries(cacheContext, targetSourcePath)
+                deletePathRecursively(targetStagedPath)
+                WorkspaceSyncResult(
+                    targetSourcePath = targetSourcePath,
+                    targetStagedPath = targetStagedPath,
+                    action = WorkspaceSyncAction.REMOVED,
+                )
+            }
+            Files.readAttributes(targetSourcePath, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS).isDirectory -> {
+                val plan = scanDirectory(
+                    policy = policy,
+                    evaluationRoot = evaluationRoot,
+                    directory = targetSourcePath,
+                    findings = findings,
+                    cacheContext = cacheContext,
+                )
+                val tempPath = temporarySiblingPath(targetStagedPath)
+                val stats = materializeDirectoryPlan(
+                    plan = plan,
+                    destinationDirectory = tempPath,
+                    allowDirectoryPassThrough = true,
+                )
+                replaceStagedPath(tempPath, targetStagedPath)
+                WorkspaceSyncResult(
+                    targetSourcePath = targetSourcePath,
+                    targetStagedPath = targetStagedPath,
+                    action = WorkspaceSyncAction.UPDATED,
+                    mirroredFiles = stats.mirroredFiles,
+                    redactedFiles = stats.redactedFiles,
+                    blockedFiles = stats.blockedFiles,
+                    passThroughFiles = stats.passThroughFiles,
+                    cacheHits = cacheContext.cacheHits,
+                    findings = findings,
+                )
+            }
+            Files.readAttributes(targetSourcePath, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS).isRegularFile -> {
+                val tempPath = temporarySiblingPath(targetStagedPath)
+                val stats = mirrorFile(
+                    policy = policy,
+                    sourceFile = targetSourcePath,
+                    destinationFile = tempPath,
+                    findings = findings,
+                    cacheContext = cacheContext,
+                )
+                if (stats.mirroredFiles > 0) {
+                    replaceStagedPath(tempPath, targetStagedPath)
+                    WorkspaceSyncResult(
+                        targetSourcePath = targetSourcePath,
+                        targetStagedPath = targetStagedPath,
+                        action = WorkspaceSyncAction.UPDATED,
+                        mirroredFiles = stats.mirroredFiles,
+                        redactedFiles = stats.redactedFiles,
+                        blockedFiles = stats.blockedFiles,
+                        passThroughFiles = stats.passThroughFiles,
+                        cacheHits = cacheContext.cacheHits,
+                        findings = findings,
+                    )
+                } else {
+                    deletePathRecursively(tempPath)
+                    deletePathRecursively(targetStagedPath)
+                    WorkspaceSyncResult(
+                        targetSourcePath = targetSourcePath,
+                        targetStagedPath = targetStagedPath,
+                        action = WorkspaceSyncAction.REMOVED,
+                        blockedFiles = stats.blockedFiles,
+                        cacheHits = cacheContext.cacheHits,
+                        findings = findings,
+                    )
+                }
+            }
+            else -> WorkspaceSyncResult(
+                targetSourcePath = targetSourcePath,
+                targetStagedPath = targetStagedPath,
+                action = WorkspaceSyncAction.IGNORED,
+            )
+        }
+        persistStageCacheContext(cacheProjectRoot, cacheContext)
+        return result
+    }
+
     private fun tryCreatePassThroughDirectoryLink(
         sourceDirectory: Path,
         destinationDirectory: Path,
@@ -448,6 +599,19 @@ class WorkspaceStager(
             )
     }
 
+    private fun loadStageCacheContext(
+        projectRoot: Path,
+        policy: LlmGuardPolicy,
+    ): StageCacheContext {
+        val manifest = loadCacheManifest(projectRoot, policy)
+        val entriesBySourcePath = manifest.entries.associateBy { it.sourcePath }
+        return StageCacheContext(
+            policyFingerprint = policyFingerprint(policy),
+            previousEntriesBySourcePath = entriesBySourcePath,
+            recordedEntries = LinkedHashMap(entriesBySourcePath),
+        )
+    }
+
     private fun writeCacheManifest(
         projectRoot: Path,
         manifest: WorkspaceStageCacheManifest,
@@ -455,6 +619,20 @@ class WorkspaceStager(
         val cacheFile = cacheManifestPath(projectRoot)
         cacheFile.parent?.createDirectories()
         manifestMapper.writerWithDefaultPrettyPrinter().writeValue(cacheFile.toFile(), manifest)
+    }
+
+    private fun persistStageCacheContext(
+        projectRoot: Path,
+        cacheContext: StageCacheContext,
+    ) {
+        writeCacheManifest(
+            projectRoot = projectRoot,
+            manifest = WorkspaceStageCacheManifest(
+                version = cacheManifestVersion,
+                policyFingerprint = cacheContext.policyFingerprint,
+                entries = cacheContext.recordedEntries.values.sortedBy { it.sourcePath },
+            ),
+        )
     }
 
     private fun cacheManifestPath(projectRoot: Path): Path =
@@ -467,6 +645,32 @@ class WorkspaceStager(
     private fun policyFingerprint(policy: LlmGuardPolicy): String = sha256(
         manifestMapper.writeValueAsBytes(policy),
     )
+
+    private fun removeCachedEntries(
+        cacheContext: StageCacheContext,
+        targetSourcePath: Path,
+    ) {
+        val prefix = "${targetSourcePath.toString()}/"
+        cacheContext.previousEntriesBySourcePath
+            .filterKeys { sourcePath -> sourcePath == targetSourcePath.toString() || sourcePath.startsWith(prefix) }
+            .forEach { (sourcePath, _) ->
+                cacheContext.recordedEntries.remove(sourcePath)
+            }
+    }
+
+    private fun temporarySiblingPath(destinationPath: Path): Path {
+        destinationPath.parent?.createDirectories()
+        return destinationPath.parent.resolve(".llm-guard-sync-${destinationPath.fileName}-${System.nanoTime()}")
+    }
+
+    private fun replaceStagedPath(
+        preparedPath: Path,
+        destinationPath: Path,
+    ) {
+        deletePathRecursively(destinationPath)
+        destinationPath.parent?.createDirectories()
+        Files.move(preparedPath, destinationPath, StandardCopyOption.REPLACE_EXISTING)
+    }
 
     private fun clearDirectory(path: Path) {
         if (!path.exists()) {
@@ -495,6 +699,21 @@ class WorkspaceStager(
                 }
             },
         )
+    }
+
+    private fun deletePathRecursively(path: Path) {
+        if (!path.exists(LinkOption.NOFOLLOW_LINKS)) {
+            return
+        }
+
+        val attributes = Files.readAttributes(path, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
+        if (!attributes.isDirectory || Files.isSymbolicLink(path)) {
+            Files.deleteIfExists(path)
+            return
+        }
+
+        clearDirectory(path)
+        Files.deleteIfExists(path)
     }
 
     private fun stableWorkspaceName(projectRoot: Path): String {
@@ -621,3 +840,21 @@ data class StagedWorkspace(
     val cacheHits: Int,
     val findings: List<GuardFinding>,
 )
+
+data class WorkspaceSyncResult(
+    val targetSourcePath: Path,
+    val targetStagedPath: Path,
+    val action: WorkspaceSyncAction,
+    val mirroredFiles: Int = 0,
+    val redactedFiles: Int = 0,
+    val blockedFiles: Int = 0,
+    val passThroughFiles: Int = 0,
+    val cacheHits: Int = 0,
+    val findings: List<GuardFinding> = emptyList(),
+)
+
+enum class WorkspaceSyncAction {
+    UPDATED,
+    REMOVED,
+    IGNORED,
+}
